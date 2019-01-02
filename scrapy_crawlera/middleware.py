@@ -15,7 +15,7 @@ class CrawleraMiddleware(object):
 
     url = 'http://proxy.crawlera.com:8010'
     maxbans = 400
-    ban_code = 503
+    ban_code = [503, 400, 404, 302]
     download_timeout = 190
     # Handle crawlera server failures
     connection_refused_delay = 90
@@ -31,6 +31,7 @@ class CrawleraMiddleware(object):
         ('maxbans', int),
         ('download_timeout', int),
         ('preserve_delay', bool),
+        ('ban_code', list)
     ]
 
     def __init__(self, crawler):
@@ -119,14 +120,17 @@ class CrawleraMiddleware(object):
         """Hook to compute Proxy-Authorization header by custom rules."""
         if self.apikey:
             return basic_auth_header(self.apikey, '')
-        return basic_auth_header(self.user, getattr(self, 'pass'))
+        if self.user:
+            return basic_auth_header(self.user, getattr(self, 'pass'))
+        return None
 
     def process_request(self, request, spider):
         if self._is_enabled_for_request(request):
             self._set_crawlera_default_headers(request)
             request.meta['proxy'] = self.url
             request.meta['download_timeout'] = self.download_timeout
-            request.headers['Proxy-Authorization'] = self._proxyauth
+            if self._proxyauth:
+                request.headers['Proxy-Authorization'] = self._proxyauth
             if self.job_id:
                 request.headers['X-Crawlera-Jobid'] = self.job_id
             self.crawler.stats.inc_value('crawlera/request')
@@ -135,8 +139,11 @@ class CrawleraMiddleware(object):
             self._clean_crawlera_headers(request)
 
     def _is_banned(self, response):
+        if hasattr(self.crawler.spider, 'is_banned') and self.crawler.spider.is_banned(response):
+            return True
+
         return (
-            response.status == self.ban_code and
+            response.status in self.ban_code or
             response.headers.get('X-Crawlera-Error') == b'banned'
         )
 
